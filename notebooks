@@ -1,0 +1,71 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Conectar a **PokeAPI** desde **Databricks**
+# MAGIC Este cuaderno obtiene una lista de Pokémon, la convierte a DataFrame y opcionalmente guarda una tabla.
+
+# COMMAND ----------
+# Si tu runtime no trae requests, lo instalas (Databricks soporta %pip)
+# MAGIC %pip install -r ../requirements.txt
+
+# COMMAND ----------
+import requests
+
+BASE_URL = "https://pokeapi.co/api/v2"
+
+def get_json(url: str):
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## 1) Lista de Pokémon (20)
+# MAGIC **Screenshot sugerido**: el `display(df)` que sale aquí abajo.
+
+# COMMAND ----------
+limit = 20
+resp = get_json(f"{BASE_URL}/pokemon?limit={limit}")
+results = resp.get("results", [])  # [{name, url}, ...]
+
+df = spark.createDataFrame(results)  # columnas: name, url
+display(df)          # <--- captura aquí
+df.show(20, truncate=False)
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## 2) (Opcional) Detalles de 10 Pokémon y guardado como tabla
+
+# COMMAND ----------
+from pyspark.sql import Row
+
+rows = []
+for r in results[:10]:
+    d = get_json(r["url"])
+    rows.append(Row(
+        id=d.get("id"),
+        name=d.get("name"),
+        base_experience=d.get("base_experience"),
+        height=d.get("height"),
+        weight=d.get("weight"),
+        types=[t["type"]["name"] for t in d.get("types", [])],
+        abilities=[a["ability"]["name"] for a in d.get("abilities", [])],
+        api_url=r["url"]
+    ))
+
+df_details = spark.createDataFrame(rows)
+display(df_details)   # <--- o también aquí la captura
+
+# Guarda tabla manejada (metastore unity o hive_metastore)
+df_details.write.mode("overwrite").saveAsTable("pokemon_raw")
+print("Tabla 'pokemon_raw' guardada.")
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## 3) (Opcional) Consulta SQL
+
+# COMMAND ----------
+# MAGIC %sql
+# MAGIC SELECT id, name, base_experience, height, weight
+# MAGIC FROM pokemon_raw
+# MAGIC ORDER BY base_experience DESC, id
+# MAGIC LIMIT 20;
